@@ -37,7 +37,7 @@ lossfunction_treat <- function(z_1, z_2) {
 #' @param f decision function for counterfactual outcome
 #' @examples
 #' generate_data_binary(seed = 2, n = 100, f = descision_function)
-generate_data <- function(n = 200, fun) {
+generate_data <- function(n = 200, fun, print_summary = FALSE) {
   x <- runif(n, min = 0, max = 1)
   z_1 <- runif(n, min = 0, max = 1)
   z_2 <- runif(n, min = 0, max = 1)
@@ -54,6 +54,10 @@ generate_data <- function(n = 200, fun) {
   y_c <- rbinom(n, prob = prob_c, size = 1)
   countfact_avg <- mean(prob_c)
 
+  if (print_summary) {
+    cat("average outcome:", std_care_avg, "\n")
+    cat("counteractual outcome:", countfact_avg, "\n")
+  }
   sim_data <- data.frame(x, z_1, z_2, treat, y, treat_c, y_c) # nolint: line_length_linter.
   return(list(sim_data, std_care_avg, countfact_avg))
 }
@@ -63,7 +67,9 @@ generate_data <- function(n = 200, fun) {
 #'
 #' @param data A list of vectors that cointains Z,T,Y,X.
 #' @param f A decision function that take Z as an imput.
-#' @return Expected value of Y with interfention T=f(Z) .
+#' @param estimated_weights using logestist regression to calculate weights
+#'                          or use the ground truth to calculate weights
+#' @return Expected value of Y with intervention T=f(Z) .
 #' @examples
 #' calculate_naive_ipw(df, decision_function)
 calculate_naive_ipw <- function(df, f, plot = FALSE, estimated_weights = TRUE) {
@@ -97,7 +103,9 @@ calculate_naive_ipw <- function(df, f, plot = FALSE, estimated_weights = TRUE) {
 #'
 #' @param data A list of vectors that cointains z,treat,y,x
 #' @param f A decision function that take Z as an imput.
-#' @return Expected value of Y with interfention treat=f(z) .
+#' @param estimated_weights using logestist regression to calculate weights
+#'                          or use the ground truth to calculate weights
+#' @return Expected value of Y with intervention treat=f(z) .
 #' @examples
 #' calculate_naive_ipw(df, decision_function)
 calculate_ipw <- function(df, f, plot = FALSE, estimated_weights = TRUE) {
@@ -131,22 +139,46 @@ calculate_ipw <- function(df, f, plot = FALSE, estimated_weights = TRUE) {
 }
 
 #various types of g-computations
-#of the form P(y=1 | f(z), z )
-calculate_naive_g_comp <- function(df, f) {
-  model <-
-    glm(df$y ~ z_1 + z_2 + z_1 * z_2 + treat  + z_1 * treat + z_2 * treat + z_1 * z_2 * treat,  # nolint: line_length_linter.
-        family = binomial(link = "logit"),
-        data = df)
 
-  df$treat <- as.integer(f(df))
+#' calculate expected value on g-computation
+#' uses formula mean(P(y | f(z), z, x)) to estimated counterfactual
+#'
+#' @param data A list of vectors that cointains z,treat,y,x
+#' @param f A decision function that take Z as an imput.
+#' @param estimated_weights using logestist regression to calculate weights
+#'                          or use the ground truth to calculate weights
+#' @return Expected value of Y with intervention treat=f(z)
+#' @examples
+#' calculate_naive_ipw(df, decision_function)
+calculate_naive_g_comp <- function(df, f, estimated_weights = TRUE) {
 
-  weights <-
-    predict(model, df[c("z_1", "z_2", "treat")], type = "response")
+  if (estimated_weights) {
+    model <-
+      glm(df$y ~ z_1 + z_2 + z_1 * z_2 + treat  + z_1 * treat + z_2 * treat + z_1 * z_2 * treat,  # nolint: line_length_linter.
+          family = binomial(link = "logit"),
+          data = df)
+
+    df$treat <- as.integer(f(df))
+
+    weights <-
+      predict(model, df[c("z_1", "z_2", "treat")], type = "response")
+  }else {
+    weights <- ifelse(f(df) == TRUE, lossfunction_treat(df$z_1, df$z_2), 1 - lossfunction_treat(df$z_1, df$z_2)) # nolint: line_length_linter.
+  }
 
   expected_y <- sum(weights) / nrow(df)
   return(expected_y)
 }
 
+#' calculate expected value on g-computation based on sigma calc
+#' uses formula sum_n p(y | t, z, x)*1(f(z)=t)*p(z,x) which is wrong!
+#' @param data A list of vectors that cointains z,treat,y,x
+#' @param f A decision function that take Z as an imput.
+#' @param estimated_weights using logestist regression to calculate weights
+#'                          or use the ground truth to calculate weights
+#' @return Expected value of Y with intervention treat=f(z)
+#' @examples
+#' calculate_naive_ipw(df, decision_function)
 calculate_g_comp <- function(df, f, estimated_weights = TRUE) {
   subindex <- f(df) == df$treat
 
@@ -155,18 +187,16 @@ calculate_g_comp <- function(df, f, estimated_weights = TRUE) {
       glm(df$y ~ z_1 + z_2 + z_1 * z_2 + treat + z_1 * treat + z_2 * treat + z_1 * z_2 * treat,  # nolint: line_length_linter.
           family = binomial(link = "logit"),
           data = df)
-
-    p_hats <-
-      predict(model, df[subindex, c("z_1", "z_2", "treat")], type = "response") # nolint: line_length_linter.
-    weights <-  df$y[subindex] * p_hats + (1 - df$y[subindex]) * (1 - p_hats)
-
-    hist(weights)
+    p_hat <-
+      predict(model,
+              df[subindex, c("z_1", "z_2", "treat")],
+              type = "response")
+    weights <- df$y[subindex] * p_hat + (1 - df$y[subindex]) * (1 - p_hat)
   } else {
-    p_hats <-ifelse(df$treat[subindex]== TRUE, lossfunction_treat(df$z_1, df$z_2), 1 - lossfunction_treat(df$z_1, df$z_2)) # nolint: line_length_linter,    
-    weights <-  df$y[subindex] * p_hats + (1 - df$y[subindex]) * (1 - p_hats)
-    hist(weights)
+    p_hat <-ifelse(df$treat[subindex]== TRUE, lossfunction_treat(df$z_1[subindex], df$z_2[subindex]), 1 - lossfunction_treat(df$z_1[subindex], df$z_2[subindex])) # nolint: line_length_linter,  
+    weights <- df$y[subindex] * p_hat + (1 - df$y[subindex]) * (1 - p_hat)
   }
-  expected_y <- sum(weights) / nrow(df)
+  expected_y <- sum(df$y[subindex] * weights) / sum(subindex)
   return(expected_y)
 }
 

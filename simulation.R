@@ -46,7 +46,7 @@ cat("\r")
 flush.console()
 
 # plot
-# Combine data into a data frame for a plot
+# Combine data into a data frame for the plot
 data <- data.frame(
   value = c(unlist(res_truth), unlist(res_naive_ipw), unlist(res_ipw), unlist(res_ipw_exact), unlist(res_g_c), unlist(res_naive_g_c), unlist(res_dr), unlist(res_dr_exact)), # nolint: line_length_linter.
   group = rep(c("truth",
@@ -71,9 +71,11 @@ ggplot(data, aes(x = value, fill = group)) +
   theme_minimal() +
   scale_x_continuous(limits = c(0, 1))
 
-mean_values
+# print mean values
+print(mean_values)
 
 
+#plot comulative means to see if they converge
 ggplot() +
   geom_line(aes(x =  1:n_iter,
                 y = cumsum(unlist(res_ipw)) / 1:n_iter),
@@ -98,8 +100,9 @@ ggplot() +
             color = "#e16208") +
   ylab("Values") + xlab("date")
 
+
 # single run
-df <- generate_data(n = 10000, f = decision_function)[[1]] # nolint: line_length_linter.
+df <- generate_data(n = 10000000, f = decision_function, print_summary = TRUE)[[1]] # nolint: line_length_linter.
 mean(df$y_c)
 mean(df$y)
 mean(df$y[decision_function(df) == df$treat])
@@ -118,5 +121,6 @@ calculate_ipw(df, decision_function, plot =  TRUE, estimated_weights = TRUE)
 calculate_ipw(df, decision_function, plot =  TRUE, estimated_weights = FALSE)
 calculate_g_comp(df, decision_function, estimated_weights = TRUE)
 calculate_g_comp(df, decision_function, estimated_weights = FALSE)
-calculate_naive_g_comp(df, decision_function)
+calculate_naive_g_comp(df, decision_function, estimated_weights = TRUE)
+calculate_naive_g_comp(df, decision_function, estimated_weights = FALSE)
 calculate_dr(df, decision_function, estimated_weights = FALSE)
