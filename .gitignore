@@ -1,3 +1,4 @@
-/Estimators.R
-/Untitled.R
-/estimator_1d.R
+# Ignore all files
+*
+# Except variance_estimate.R
+!variance_estimation/variance_estimate.R

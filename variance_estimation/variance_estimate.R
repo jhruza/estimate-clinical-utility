@@ -290,7 +290,6 @@ f <- function(df) {
 g <- function(df) {
   ifelse(df$x2 > 0, 1, 0)
 }
-f_0 <- function(df) rep(0, nrow(df))
 
 
 
@@ -306,9 +305,8 @@ for (i in 1:n_loop) {
 }
 
 hist(variances)
-var(results)
 abline(v = var(unlist(results)))
-
+mean(variances) / var(results)
 
 density_results <- density(results)
 plot(density_results, main = "Density Plot of Results", xlab = "Outcome", col = "blue")
