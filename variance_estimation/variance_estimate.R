@@ -39,34 +39,19 @@ calculate_ipw_b <- function(df, f, covariates = NULL, propensity_model_equation 
 }
 #' Calculate Clinical Utility
 #'
-#' This function calculates the clinical utility of two treatment assignment functions `f` and `g` 
-#' using inverse probability weighting (IPW). Optionally, it can also estimate the variance of the 
+#' This function calculates the clinical utility of two treatment assignment functions `f` and `g`
+#' using inverse probability weighting (IPW). Optionally, it can also estimate the variance of the
 #' clinical utility difference.
 #'
 #' @param df A data frame containing the dataset. It must include columns "t" (treatment) and "y" (outcome).
-#' @param f A function that assigns treatment based on the covariates in `df`.
-#' @param g Another function that assigns treatment based on the covariates in `df`.
-#' @param est_variance A logical value indicating whether to estimate the variance of the clinical utility difference. Default is TRUE.
+#' @param f A treatement regime that assigns treatment based on the covariates in `df`.
+#' @param g Another treatment regime that assigns treatment based on the covariates in `df`.
+#' @param est_variance A logical value indicating whether to estimate the variance of the clinical utility
+#' difference. Default is TRUE.
 #'
 #' @return A list containing:
 #' \item{clinical_util}{The difference in clinical utility between the two treatment assignment functions `f` and `g`.}
 #' \item{variance}{(Optional) The estimated variance of the clinical utility difference, if `est_variance` is TRUE.}
-#'
-#' @details
-#' The clinical utility is calculated as the difference in expected outcomes between the two treatment assignment functions `f` and `g`, 
-#' weighted by the inverse of the propensity scores. If `est_variance` is TRUE, the function also estimates the variance of this difference 
-#' using a vegetarian sandwich estimator.
-#'
-#' @examples
-#' # Example usage:
-#' df <- data.frame(t = sample(0:1, 100, replace = TRUE), y = rnorm(100), x1 = rnorm(100), x2 = rnorm(100))
-#' f <- function(df) { ifelse(df$x1 > 0, 1, 0) }
-#' g <- function(df) { ifelse(df$x2 > 0, 1, 0) }
-#' result <- clinical_utility(df, f, g)
-#' print(result$clinical_util)
-#' if (!is.null(result$variance)) {
-#'   print(result$variance)
-#' }
 #'
 #' @export
 clinical_utility <- function(df, f, g, est_variance = TRUE) {
@@ -77,7 +62,7 @@ clinical_utility <- function(df, f, g, est_variance = TRUE) {
   if (est_variance) {
     covariates <- df[, setdiff(names(df), c("t", "y"))]
 
-    # indicator if assigned treatment follows observed treatment
+    # indicators if assigned treatments follows observed treatment
     w_f <- f(df) == df$t
     w_g <- g(df) == df$t
 
@@ -135,11 +120,6 @@ clinical_utility <- function(df, f, g, est_variance = TRUE) {
 #' @param df A data frame.
 #'
 #' @return A modified data frame with factor columns converted to numeric columns.
-#'
-#' @examples
-#' df <- data.frame(a = factor(c("1", "2", "3")), b = c(4, 5, 6))
-#' rm_factors(df)
-#'
 rm_factors <- function(df) {
   factor_cols <- sapply(df, is.factor)
   df[factor_cols] <- lapply(df[factor_cols], function(x) as.numeric(as.character(x)))
@@ -183,7 +163,24 @@ p_default <- function(t, z_1, z_2) {
 
   return(p)
 }
-
+#' Generate Data with Non-Binary Covariates
+#'
+#' This function generates a dataset with non-binary covariates and assigns treatments based on the covariates.
+#' For more details see Appendix
+#'
+#' @param n An integer representing the number of samples to generate. Default is 10000.
+#' @param f A treatment regime for which the true counteractual average outcome is calculated. Default is NULL.
+#' @param print_summary A logical indicating whether to print a summary of the generated data. Default is FALSE.
+#' @param slider A variable to adjust the propability to get the optimal treatment according to the optimal
+#' decision function. slider ->infinity: prop of being treatet opimal=1.
+#' slider-> -infinity prop of being treatet opimal=0. Default is NULL.
+#'
+#'  @return A list containing:
+#' \item{sim_data}{A data frame containing the simulated population}
+#' \item{std_care_avg}{A numeric value representing the average standard of care.}
+#' \item{counterfactual_avg}{A numeric value representing the average counterfactual outcome according to f.}
+#' @examples
+#' generate_data_nb(n = 1000, print_summary = TRUE)
 generate_data_nb <- function(n = 10000, f = NULL, print_summary = FALSE, slider = NULL) {
   z_1 <- sample(seq(from = 0, to = 1, by = 0.1), n, replace = TRUE)
   z_2 <- rbinom(n, size = 1, prob = 0.7)
@@ -241,6 +238,10 @@ generate_data_nb <- function(n = 10000, f = NULL, print_summary = FALSE, slider 
   return(list(sim_data = sim_data, std_care_avg = std_care_avg, counterfactual_avg = counterfactual_avg))
 }
 
+
+
+# example calculations:
+
 f_1 <- function(df) rep(1, nrow(df))
 f_2 <- function(df) rep(2, nrow(df))
 f_3 <- function(df) rep(3, nrow(df))
@@ -256,23 +257,21 @@ a$outcome
 clinical_utility(df, f_2, f_optimal)
 clinical_utility(df, f_optimal, f_2)
 n_loop <- 500
-n <- 100000
+n <- 500
 results <- numeric(n_loop)
 variances <- numeric(n_loop)
 for (i in 1:n_loop) {
-  df <- generate_data_nb(f = f_optimal, n = n, slider = 0)$sim_data[, c("y", "t", "z_1", "z_2")]
-  cu <- clinical_utility(df, f_1, f_2, est_variance = TRUE)
+  df <- generate_data_nb(f = f_optimal, n = n, slider = -10)$sim_data[, c("y", "t", "z_1", "z_2")]
+  cu <- clinical_utility(df, f_optimal, f_1, est_variance = TRUE)
   results[i] <- cu$outcome
   variances[i] <- cu$variance
 }
-hist(variances)
-var(results)f
-mean(variances)
-mean(variances)/var(results)
-abline(v = var(unlist(results)))
 
-variances_prev <- variances
-results_prev <- results
+hist(variances)
+abline(v = var(unlist(results)))
+var(results)
+mean(variances)
+mean(variances) / var(results)
 
 density_results <- density(results)
 plot(density_results, main = "Density Plot of Results", xlab = "Outcome", col = "blue")
@@ -282,10 +281,15 @@ y <- dnorm(x, mean = mean(results), sd = sqrt(mean(variances)))
 lines(x, y, col = "red")
 
 
-# random example:
+
+# random generated data example:
 df <- data.frame(t = sample(0:1, 100, replace = TRUE), y = rnorm(100), x1 = rnorm(100), x2 = rnorm(100))
-f <- function(df) { ifelse(df$x1 > 0, 1, 0) }
-g <- function(df) { ifelse(df$x2 > 0, 1, 0) }
+f <- function(df) {
+  ifelse(df$x1 > 0, 1, 0)
+}
+g <- function(df) {
+  ifelse(df$x2 > 0, 1, 0)
+}
 f_0 <- function(df) rep(0, nrow(df))
 
 
@@ -296,7 +300,7 @@ results <- numeric(n_loop)
 variances <- numeric(n_loop)
 for (i in 1:n_loop) {
   df <- data.frame(t = sample(0:1, n, replace = TRUE), y = rnorm(n), x1 = rnorm(n), x2 = rnorm(n))
-  cu <- clinical_utility(df, f_1, f_0, est_variance = TRUE)
+  cu <- clinical_utility(df, f, g, est_variance = TRUE)
   results[i] <- cu$outcome
   variances[i] <- cu$variance
 }
