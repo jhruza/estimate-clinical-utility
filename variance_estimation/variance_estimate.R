@@ -19,7 +19,7 @@ calculate_ipw_b <- function(df, f, covariates = NULL, propensity_model_equation 
     formula_string <- paste("w ~", paste(covariates, collapse = " * "))
   } else {
     # check if propensity_model_equation is a string
-    stopifnot(class(propensity_model_equation) == "string")
+    stopifnot(is.character(propensity_model_equation))
     # check that covariates are in df
     stopifnot(all(covariates %in% names(df)))
 
@@ -32,7 +32,7 @@ calculate_ipw_b <- function(df, f, covariates = NULL, propensity_model_equation 
   model <-
     glm(formula, family = binomial(link = "logit"), data = df)
   weights <-
-    predict(model, df[w, covariates], type = "response")
+    predict(model, df[w, ], type = "response")
   expected_y <- sum(df$y[w] / weights) / nrow(df)
 
   return(list(outcome = expected_y, prop_model = model))
@@ -58,27 +58,31 @@ clinical_utility <- function(df, f, g, est_variance = TRUE) {
   n <- nrow(df)
   ipw_f <- calculate_ipw_b(df, f)
   ipw_g <- calculate_ipw_b(df, g)
-  clinical_util <- ipw_f$outcome - ipw_g$outcome
+
+  w_f <- f(df) == df$t
+  w_g <- g(df) == df$t
+
+  # propensity scores for f
+  ps_f <- predict(ipw_f$prop_model, type = "response", data = df)
+  # propensity scores for g
+  ps_g <- predict(ipw_g$prop_model, type = "response", data = df)
+
+  clinical_util <- sum(df$y[w_f] / ps_f[w_f]) / nrow(df) - sum(df$y[w_g] / ps_g[w_g]) / nrow(df)
   if (est_variance) {
-    covariates <- df[, setdiff(names(df), c("t", "y"))]
-
     # indicators if assigned treatments follows observed treatment
-    w_f <- f(df) == df$t
-    w_g <- g(df) == df$t
 
-    # propensity scores for f
-    ps_f <- predict(ipw_f$prop_model, covariates, type = "response")
-    # propensity scores for g
-    ps_g <- predict(ipw_g$prop_model, covariates, type = "response")
+    # assume model matrix is not the same for ipw_f and ipw_g
+    model_mat_f <- model.matrix(ipw_f$prop_model)
+    model_mat_g <- model.matrix(ipw_g$prop_model)
 
-    # assume model matrix is the same for ipw_f and ipw_g
-    model_mat <- model.matrix(ipw_f$prop_model)
-    n_features <- ncol(model_mat)
-    A <- colSums(model_mat * w_f * df$y * (1 - (1 / ps_f))) / n
-    B <- colSums(model_mat * w_g * df$y * (1 - (1 / ps_g))) / n
+    n_features_f <- ncol(model_mat_f)
+    n_features_g <- ncol(model_mat_g)
 
-    partial_M2 <- t(model_mat) %*% (model_mat * (-ps_f + ps_f^2))
-    partial_M3 <- t(model_mat) %*% (model_mat * (-ps_g + ps_g^2))
+    A <- colSums(model_mat_f * w_f * df$y * ((1 / ps_f) - 1)) / n
+    B <- colSums(model_mat_g * w_g * df$y * (1 - (1 / ps_g))) / n
+
+    partial_M2 <- t(model_mat_f) %*% (model_mat_f * (ps_f * (1 - ps_f)))
+    partial_M3 <- t(model_mat_g) %*% (model_mat_g * (ps_g * (1 - ps_g)))
 
     partial_M2 <- partial_M2 / n
     partial_M3 <- partial_M3 / n
@@ -89,17 +93,16 @@ clinical_utility <- function(df, f, g, est_variance = TRUE) {
     # create bread matrix for vegetarian sandwich estimator
     bread_matrix <- rbind(
       cbind(-1, A %*% partial_M2_inv, B %*% partial_M3_inv),
-      cbind(0, partial_M2_inv, matrix(0, nrow = n_features, ncol = n_features)),
-      cbind(0, matrix(0, nrow = n_features, ncol = n_features), partial_M3_inv)
+      cbind(0, partial_M2_inv, matrix(0, nrow = n_features_f, ncol = n_features_g)),
+      cbind(0, matrix(0, nrow = n_features_g, ncol = n_features_f), partial_M3_inv)
     )
 
     # create cheese matrix for vegetarian sandwich estimator
-    cheese_matrix <- matrix(0, nrow = 2 * n_features + 1, ncol = 2 * n_features + 1)
+    cheese_matrix <- matrix(0, nrow = n_features_f + n_features_g + 1, ncol = n_features_f + n_features_g + 1)
     for (i in 1:n) {
-      c_i <- as.numeric(model_mat[i, ])
-      M1 <- as.numeric(w_f[i] * df$y[i] / ps_f[i] - w_g[i] * df$y[i] / ps_g[i] - clinical_util)
-      M2 <- c_i * (w_f[i] - ps_f[i])
-      M3 <- c_i * (w_g[i] - ps_g[i])
+      M1 <- w_f[i] * df$y[i] / ps_f[i] - w_g[i] * df$y[i] / ps_g[i] - clinical_util
+      M2 <- model_mat_f[i, ] * (w_f[i] - ps_f[i])
+      M3 <- model_mat_g[i, ] * (w_g[i] - ps_g[i])
       m_i <- c(M1, M2, M3)
       cheese_matrix <- cheese_matrix + outer(m_i, m_i, "*")
     }
@@ -182,7 +185,7 @@ p_default <- function(t, z_1, z_2) {
 #' @examples
 #' generate_data_nb(n = 1000, print_summary = TRUE)
 generate_data_nb <- function(n = 10000, f = NULL, print_summary = FALSE, slider = NULL) {
-  z_1 <- sample(seq(from = 0, to = 1, by = 0.1), n, replace = TRUE)
+  z_1 <- sample(seq(from = 0, to = 1, by = 0.2), n, replace = TRUE)
   z_2 <- rbinom(n, size = 1, prob = 0.7)
 
   # set up empty vectors for the probability of three treatments
@@ -226,7 +229,6 @@ generate_data_nb <- function(n = 10000, f = NULL, print_summary = FALSE, slider 
     prob_default_c <- p_default(t_c, z_1, z_2)
     counterfactual_avg <- mean(prob_default_c)
   } else {
-    t_c <- NA
     counterfactual_avg <- NA
   }
 
@@ -234,35 +236,34 @@ generate_data_nb <- function(n = 10000, f = NULL, print_summary = FALSE, slider 
     cat("average outcome:", std_care_avg, "\n")
     cat("counterfactual outcome:", counterfactual_avg, "\n")
   }
-  sim_data <- data.frame(z_1 = as.factor(z_1), z_2, t, y, t_c)
+  sim_data <- data.frame(z_1 = as.factor(z_1), z_2, t, y)
   return(list(sim_data = sim_data, std_care_avg = std_care_avg, counterfactual_avg = counterfactual_avg))
 }
 
 
 
 # example calculations:
-
 f_1 <- function(df) rep(1, nrow(df))
 f_2 <- function(df) rep(2, nrow(df))
 f_3 <- function(df) rep(3, nrow(df))
 
 
-data <- generate_data_nb(f = f_2, n = 500, slider = -1, print_summary = TRUE)
-data$std_care_avg
-data$counterfactual_avg
-df <- data$sim_data[, c("y", "t", "z_1", "z_2")]
-a <- calculate_ipw_b(df, f_2)
+data <- generate_data_nb(f = f_1, n = 10000, slider = NULL, print_summary = TRUE)
+df <- data$sim_data
+clinical_utility(df, f_1, f_2)
+
+a <- calculate_ipw_b(df, f_1)
 a$outcome
 
-clinical_utility(df, f_2, f_optimal)
+clinical_utility(df, f_1, f_2)
 clinical_utility(df, f_optimal, f_2)
-n_loop <- 500
-n <- 500
+n_loop <- 1000
+n <- 20000
 results <- numeric(n_loop)
 variances <- numeric(n_loop)
 for (i in 1:n_loop) {
-  df <- generate_data_nb(f = f_optimal, n = n, slider = -10)$sim_data[, c("y", "t", "z_1", "z_2")]
-  cu <- clinical_utility(df, f_optimal, f_1, est_variance = TRUE)
+  df <- generate_data_nb(f = f_1, n = n, slider = NULL)$sim_data
+  cu <- clinical_utility(df, f_3, f_optimal, est_variance = TRUE)
   results[i] <- cu$outcome
   variances[i] <- cu$variance
 }
@@ -273,41 +274,7 @@ var(results)
 mean(variances)
 mean(variances) / var(results)
 
-density_results <- density(results)
-plot(density_results, main = "Density Plot of Results", xlab = "Outcome", col = "blue")
-lines(density_results, col = "blue")
-x <- seq(-1, 1, length.out = 1000)
-y <- dnorm(x, mean = mean(results), sd = sqrt(mean(variances)))
-lines(x, y, col = "red")
-
-
-
-# random generated data example:
-df <- data.frame(t = sample(0:1, 100, replace = TRUE), y = rnorm(100), x1 = rnorm(100), x2 = rnorm(100))
-f <- function(df) {
-  ifelse(df$x1 > 0, 1, 0)
-}
-g <- function(df) {
-  ifelse(df$x2 > 0, 1, 0)
-}
-
-
-
-n_loop <- 5000
-n <- 1000
-results <- numeric(n_loop)
-variances <- numeric(n_loop)
-for (i in 1:n_loop) {
-  df <- data.frame(t = sample(0:1, n, replace = TRUE), y = rnorm(n), x1 = rnorm(n), x2 = rnorm(n))
-  cu <- clinical_utility(df, f, g, est_variance = TRUE)
-  results[i] <- cu$outcome
-  variances[i] <- cu$variance
-}
-
-hist(variances)
-abline(v = var(unlist(results)))
-mean(variances) / var(results)
-
+# plot emperical distribution vs nomal distribution with estimated parameters
 density_results <- density(results)
 plot(density_results, main = "Density Plot of Results", xlab = "Outcome", col = "blue")
 lines(density_results, col = "blue")
