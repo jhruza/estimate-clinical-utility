@@ -40,7 +40,7 @@ calculate_ipw_b <- function(df, f, covariates = NULL, propensity_model_equation 
 #' Calculate Clinical Utility
 #'
 #' This function calculates the clinical utility of two treatment assignment functions `f` and `g`
-#' using inverse probability weighting (IPW). Optionally, it can also estimate the variance of the
+#' using binary inverse probability weighting (IPW). Optionally, it can also estimate the variance of the
 #' clinical utility difference.
 #'
 #' @param df A data frame containing the dataset. It must include columns "t" (treatment) and "y" (outcome).
@@ -54,7 +54,7 @@ calculate_ipw_b <- function(df, f, covariates = NULL, propensity_model_equation 
 #' \item{variance}{(Optional) The estimated variance of the clinical utility difference, if `est_variance` is TRUE.}
 #'
 #' @export
-clinical_utility <- function(df, f, g, est_variance = TRUE) {
+cu_ipw_b <- function(df, f, g, est_variance = TRUE) {
   n <- nrow(df)
   ipw_f <- calculate_ipw_b(df, f)
   ipw_g <- calculate_ipw_b(df, g)
@@ -112,7 +112,96 @@ clinical_utility <- function(df, f, g, est_variance = TRUE) {
   } else {
     variance <- NULL
   }
-  return(list(outcome = clinical_util, variance = variance))
+  return(list(clinical_utility = clinical_util, variance = variance))
+}
+
+#' Calculate Clinical Utility
+#'
+#' This function calculates the clinical utility of two treatment assignment functions `f` and `g`
+#' using multinomial inverse probability weighting (IPW). Optionally, it can also estimate the variance of the
+#' clinical utility difference.
+#'
+#' @param df A data frame containing the dataset. It must include columns "t" (treatment) and "y" (outcome).
+#' @param f A treatement regime that assigns treatment based on the covariates in `df`.
+#' @param g Another treatment regime that assigns treatment based on the covariates in `df`.
+#' @param est_variance A logical value indicating whether to estimate the variance of the clinical utility
+#' difference. Default is TRUE.
+#'
+#' @return A list containing:
+#' \item{clinical_util}{The difference in clinical utility between the two treatment assignment functions `f` and `g`.}
+#' \item{variance}{(Optional) The estimated variance of the clinical utility difference, if `est_variance` is TRUE.}
+#'
+#' @export
+cu_ipw_nb <- function(df, f, g, est_variance = FALSE) {
+  n <- nrow(df)
+  levels_t <- length(unique(df$t))
+
+  w_f <- f(df) == df$t
+  w_g <- g(df) == df$t
+
+  # use argument trace = FALSE to ignore outputs
+  model <- nnet::multinom(t ~ (. - y)^2, data = df, trace = FALSE, Hess = FALSE)
+  all_p_hat <- predict(model, newdata = df, type = "probs") # nolint
+
+  # select weights for T=t_i
+  index_prop <- 0:(n - 1) * ncol(all_p_hat) + df$t
+  prop_score <- t(all_p_hat)[index_prop]
+
+  cu <- sum(df$y[w_f] / prop_score[w_f]) / nrow(df) - sum(df$y[w_g] / prop_score[w_g]) / nrow(df)
+
+  if (est_variance) {
+    mm <- model.matrix(model)
+    n_covariates <- dim(mm)[2]
+    partial_M2 <- matrix(0, nrow = (levels_t - 1) * n_covariates, ncol = (levels_t - 1) * n_covariates)
+    for (i in 1:n) {
+      Lambda <- all_p_hat[i, -1] %*% t(all_p_hat[i, -1]) - diag(all_p_hat[i, -1])
+      partial_M2_temp <- kronecker(Lambda, mm[i, ] %*% t(mm[i, ]))
+      partial_M2 <- partial_M2 + partial_M2_temp
+    }
+    partial_M2 <- partial_M2 / n
+
+    # calclate partial M1/partial beta
+    delta_matrix <- matrix(0, ncol = levels_t - 1, nrow = n)
+    for (j in 2:levels_t) {
+      temp_index <- df$t == j
+      delta_matrix[temp_index, j - 1] <- 1 / all_p_hat[temp_index, j]
+    }
+
+    MatP <- all_p_hat[, -1] / prop_score - delta_matrix
+
+    MatC <- matrix(0, ncol = n_covariates * (levels_t - 1), nrow = n)
+    for (i in 1:(levels_t - 1)) {
+      MatC[, ((i - 1) * n_covariates + 1):(i * n_covariates)] <- mm * MatP[, i]
+    }
+
+    A <- colSums((w_f - w_g) * df$y * MatC) / n
+
+    to_invert <- rbind(
+      cbind(-1, t(A)),
+      cbind(0, partial_M2)
+    )
+
+    bread_matrix <- solve(to_invert)
+
+
+    cheese_matrix <- matrix(0, nrow = (levels_t - 1) * n_covariates + 1, ncol = (levels_t - 1) * n_covariates + 1)
+    for (i in 1:n) {
+      M1 <- w_f[i] * df$y[i] / prop_score[i] - w_g[i] * df$y[i] / prop_score[i] - cu
+
+      kronecker_w <- rep(0, levels_t)
+      kronecker_w[df$t[i]] <- 1
+      M2 <- kronecker((kronecker_w[-1] - all_p_hat[i, -1]), mm[i, ])
+
+      m_i <- c(M1, M2)
+      cheese_matrix <- cheese_matrix + outer(m_i, m_i, "*")
+    }
+    cheese_matrix <- cheese_matrix / n
+    cov_matrix <- bread_matrix %*% cheese_matrix %*% t(bread_matrix)
+    variance <- cov_matrix[1, 1] / n
+  } else {
+    variance <- NULL
+  }
+  return(list(clinical_utility = cu, variance = variance))
 }
 
 #' Remove factors from a data frame
@@ -166,6 +255,7 @@ p_default <- function(t, z_1, z_2) {
 
   return(p)
 }
+
 #' Generate Data with Non-Binary Covariates
 #'
 #' This function generates a dataset with non-binary covariates and assigns treatments based on the covariates.
@@ -250,29 +340,29 @@ f_3 <- function(df) rep(3, nrow(df))
 
 data <- generate_data_nb(f = f_1, n = 10000, slider = NULL, print_summary = TRUE)
 df <- data$sim_data
-clinical_utility(df, f_1, f_2)
+cu_ipw_b(df, f_1, f_2)
+cu_ipw_nb(df, f_1, f_2, est_variance = TRUE)
 
 a <- calculate_ipw_b(df, f_1)
 a$outcome
 
-clinical_utility(df, f_1, f_2)
-clinical_utility(df, f_optimal, f_2)
-n_loop <- 1000
-n <- 20000
+cu_ipw_nb(df, f_1, f_2, est_variance = TRUE)
+n_loop <- 300
+n <- 10000
 results <- numeric(n_loop)
 variances <- numeric(n_loop)
 for (i in 1:n_loop) {
-  df <- generate_data_nb(f = f_1, n = n, slider = NULL)$sim_data
-  cu <- clinical_utility(df, f_3, f_optimal, est_variance = TRUE)
-  results[i] <- cu$outcome
+  df <- generate_data_nb(f = f_1, n = n, slider = 1)$sim_data
+  cu <- cu_ipw_nb(df, f_3, f_optimal, est_variance = TRUE)
+  results[i] <- cu$clinical_utility
   variances[i] <- cu$variance
 }
+mean(variances) / var(results)
 
 hist(variances)
 abline(v = var(unlist(results)))
 var(results)
 mean(variances)
-mean(variances) / var(results)
 
 # plot emperical distribution vs nomal distribution with estimated parameters
 density_results <- density(results)
