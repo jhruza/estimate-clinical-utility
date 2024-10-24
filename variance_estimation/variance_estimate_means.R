@@ -39,71 +39,58 @@ calculate_ipw_b <- function(df, f, covariates = NULL, propensity_model_equation 
 }
 #' Calculate Clinical Utility
 #'
-#' This function calculates the clinical utility of two treatment assignment functions `f` and `g`
+#' This function calculates the clinical utility of regime f with the mean
 #' using binary inverse probability weighting (IPW). Optionally, it can also estimate the variance of the
 #' clinical utility difference.
 #'
 #' @param df A data frame containing the dataset. It must include columns "t" (treatment) and "y" (outcome).
 #' @param f A treatement regime that assigns treatment based on the covariates in `df`.
-#' @param g Another treatment regime that assigns treatment based on the covariates in `df`.
 #' @param est_variance A logical value indicating whether to estimate the variance of the clinical utility
 #' difference. Default is TRUE.
 #'
 #' @return A list containing:
-#' \item{clinical_util}{The difference in clinical utility between the two treatment assignment functions `f` and `g`.}
+#' \item{clinical_util}{The difference in clinical utility between treatment assignment functions `f` and its mean.}
 #' \item{variance}{(Optional) The estimated variance of the clinical utility difference, if `est_variance` is TRUE.}
 #'
 #' @export
-cu_ipw_b <- function(df, f, g, est_variance = TRUE) {
+cu_ipw_b <- function(df, f, est_variance = TRUE) {
   n <- nrow(df)
   ipw_f <- calculate_ipw_b(df, f)
-  ipw_g <- calculate_ipw_b(df, g)
 
   w_f <- f(df) == df$t
-  w_g <- g(df) == df$t
 
   # propensity scores for f
   ps_f <- predict(ipw_f$prop_model, type = "response", newdata = df)
   # propensity scores for g
-  ps_g <- predict(ipw_g$prop_model, type = "response", newdata = df)
 
-  clinical_util <- sum(df$y[w_f] / ps_f[w_f]) / nrow(df) - sum(df$y[w_g] / ps_g[w_g]) / nrow(df)
+  clinical_util <- sum(df$y[w_f] / ps_f[w_f]) / nrow(df) - sum(df$y) / nrow(df)
   if (est_variance) {
     # indicators if assigned treatments follows observed treatment
 
-    # assume model matrix is not the same for ipw_f and ipw_g
     model_mat_f <- model.matrix(ipw_f$prop_model)
-    model_mat_g <- model.matrix(ipw_g$prop_model)
 
     n_features_f <- ncol(model_mat_f)
-    n_features_g <- ncol(model_mat_g)
 
     A <- colSums(model_mat_f * w_f * df$y * ((1 / ps_f) - 1)) / n
-    B <- colSums(model_mat_g * w_g * df$y * (1 - (1 / ps_g))) / n
 
     partial_M2 <- t(model_mat_f) %*% (model_mat_f * (ps_f * (1 - ps_f)))
-    partial_M3 <- t(model_mat_g) %*% (model_mat_g * (ps_g * (1 - ps_g)))
 
     partial_M2 <- partial_M2 / n
-    partial_M3 <- partial_M3 / n
 
     partial_M2_inv <- solve(partial_M2)
-    partial_M3_inv <- solve(partial_M3)
 
     # create bread matrix for vegetarian sandwich estimator
     bread_matrix <- rbind(
-      cbind(-1, A %*% partial_M2_inv, B %*% partial_M3_inv),
-      cbind(0, partial_M2_inv, matrix(0, nrow = n_features_f, ncol = n_features_g)),
-      cbind(0, matrix(0, nrow = n_features_g, ncol = n_features_f), partial_M3_inv)
+      cbind(-1, A %*% partial_M2_inv),
+      cbind(0, partial_M2_inv)
     )
 
     # create cheese matrix for vegetarian sandwich estimator
-    cheese_matrix <- matrix(0, nrow = n_features_f + n_features_g + 1, ncol = n_features_f + n_features_g + 1)
+    cheese_matrix <- matrix(0, nrow = n_features_f + 1, ncol = n_features_f + 1)
     for (i in 1:n) {
-      M1 <- w_f[i] * df$y[i] / ps_f[i] - w_g[i] * df$y[i] / ps_g[i] - clinical_util
+      M1 <- w_f[i] * df$y[i] / ps_f[i] - df$y[i] - clinical_util
       M2 <- model_mat_f[i, ] * (w_f[i] - ps_f[i])
-      M3 <- model_mat_g[i, ] * (w_g[i] - ps_g[i])
-      m_i <- c(M1, M2, M3)
+      m_i <- c(M1, M2)
       cheese_matrix <- cheese_matrix + outer(m_i, m_i, "*")
     }
     cheese_matrix <- cheese_matrix / n
@@ -117,27 +104,25 @@ cu_ipw_b <- function(df, f, g, est_variance = TRUE) {
 
 #' Calculate Clinical Utility
 #'
-#' This function calculates the clinical utility of two treatment assignment functions `f` and `g`
+#' This function calculates the clinical utility of regime f with the mean
 #' using multinomial inverse probability weighting (IPW). Optionally, it can also estimate the variance of the
 #' clinical utility difference.
 #'
 #' @param df A data frame containing the dataset. It must include columns "t" (treatment) and "y" (outcome).
 #' @param f A treatement regime that assigns treatment based on the covariates in `df`.
-#' @param g Another treatment regime that assigns treatment based on the covariates in `df`.
 #' @param est_variance A logical value indicating whether to estimate the variance of the clinical utility
 #' difference. Default is TRUE.
 #'
 #' @return A list containing:
-#' \item{clinical_util}{The difference in clinical utility between the two treatment assignment functions `f` and `g`.}
+#' \item{clinical_util}{The difference in clinical utility between treatment assignment functions `f` and its mean.}
 #' \item{variance}{(Optional) The estimated variance of the clinical utility difference, if `est_variance` is TRUE.}
 #'
 #' @export
-cu_ipw_nb <- function(df, f, g, est_variance = FALSE) {
+cu_ipw_nb <- function(df, f, est_variance = FALSE) {
   n <- nrow(df)
   levels_t <- length(unique(df$t))
 
   w_f <- f(df) == df$t
-  w_g <- g(df) == df$t
 
   # use argument trace = FALSE to ignore outputs
   model <- nnet::multinom(t ~ (. - y)^2, data = df, trace = FALSE, Hess = FALSE)
@@ -147,7 +132,7 @@ cu_ipw_nb <- function(df, f, g, est_variance = FALSE) {
   index_prop <- 0:(n - 1) * ncol(all_p_hat) + df$t
   prop_score <- t(all_p_hat)[index_prop]
 
-  cu <- sum(df$y[w_f] / prop_score[w_f]) / nrow(df) - sum(df$y[w_g] / prop_score[w_g]) / nrow(df)
+  cu <- sum(df$y[w_f] / prop_score[w_f]) / nrow(df) - sum(df$y) / nrow(df)
 
   if (est_variance) {
     mm <- model.matrix(model)
@@ -174,7 +159,7 @@ cu_ipw_nb <- function(df, f, g, est_variance = FALSE) {
       MatC[, ((i - 1) * n_covariates + 1):(i * n_covariates)] <- mm * MatP[, i]
     }
 
-    A <- colSums((w_f - w_g) * df$y * MatC) / n
+    A <- colSums((w_f) * df$y * MatC) / n
 
     to_invert <- rbind(
       cbind(-1, t(A)),
@@ -186,7 +171,7 @@ cu_ipw_nb <- function(df, f, g, est_variance = FALSE) {
 
     cheese_matrix <- matrix(0, nrow = (levels_t - 1) * n_covariates + 1, ncol = (levels_t - 1) * n_covariates + 1)
     for (i in 1:n) {
-      M1 <- w_f[i] * df$y[i] / prop_score[i] - w_g[i] * df$y[i] / prop_score[i] - cu
+      M1 <- w_f[i] * df$y[i] / prop_score[i] - df$y[i] - cu
 
       kronecker_w <- rep(0, levels_t)
       kronecker_w[df$t[i]] <- 1
@@ -206,82 +191,65 @@ cu_ipw_nb <- function(df, f, g, est_variance = FALSE) {
 
 #' Calculate Clinical Utility
 #'
-#' This function calculates the clinical utility of two treatment assignment functions `f` and `g`
+#' This function calculates the clinical utility of regime f with the mean
 #' using a binary outcome regression model (g-computation). Optionally, it can also estimate the variance of the
 #' clinical utility difference.
 #'
 #' @param df A data frame containing the dataset. It must include columns "t" (treatment) and "y" (outcome).
 #' @param f A treatement regime that assigns treatment based on the covariates in `df`.
-#' @param g Another treatment regime that assigns treatment based on the covariates in `df`.
 #' @param est_variance A logical value indicating whether to estimate the variance of the clinical utility
 #' difference. Default is TRUE.
 #'
 #' @return A list containing:
-#' \item{clinical_util}{The difference in clinical utility between the two treatment assignment functions `f` and `g`.}
+#' \item{clinical_util}{The difference in clinical utility between treatment assignment functions `f` and its mean.}
 #' \item{variance}{(Optional) The estimated variance of the clinical utility difference, if `est_variance` is TRUE.}
 #'
 #' @export
-cu_gcomp_b <- function(df, f, g, est_variance = FALSE) {
+cu_gcomp_b <- function(df, f, est_variance = FALSE) {
   n <- nrow(df)
   df$w_f <- as.numeric(f(df) == df$t)
-  df$w_g <- as.numeric(g(df) == df$t)
 
-  formula_f <- as.formula("y ~ (. - w_g - t)^3")
-  formula_g <- as.formula("y ~ (. - w_f - t)^3")
+  formula_f <- as.formula("y ~ (. - t)^3")
 
   # outcome model for f
   model_f <- glm(formula_f, family = binomial(link = "logit"), data = df)
   est_y_f <- predict(model_f, type = "response", newdata = df)
-  # outcome model for g
-  model_g <- glm(formula_g, family = binomial(link = "logit"), data = df)
-  est_y_g <- predict(model_g, type = "response", newdata = df)
 
-  # change input such that f and g are used every time
+  # change input such that f is applied for each datapoint
   df$w_f <- 1
-  df$w_g <- 1
 
   y_f <- predict(model_f, type = "response", newdata = df)
-  y_g <- predict(model_g, type = "response", newdata = df)
 
 
-  clinical_util <- mean(y_f) - mean(y_g)
+  clinical_util <- mean(y_f) - mean(df$y)
 
   if (est_variance) {
     # indicators if assigned treatments follows observed treatment
 
-    # assume model matrix is not the same for ipw_f and ipw_g
     model_mat_f <- model.matrix(model_f)
-    model_mat_g <- model.matrix(model_g)
 
     n_features_f <- ncol(model_mat_f)
-    n_features_g <- ncol(model_mat_g)
 
-    A <- colSums(model.matrix(formula_f, data = df) * y_f * (1 - y_f) * (-1)) / n
-    B <- colSums(model.matrix(formula_g, data = df) * y_g * (y_g - 1)) * (-1) / n
-
+    A <- colSums(model.matrix(formula_f, data = df) * y_f * (-1) * (1 - y_f)) / n
     partial_M2 <- t(model_mat_f) %*% (model_mat_f * (est_y_f * (1 - est_y_f)))
-    partial_M3 <- t(model_mat_g) %*% (model_mat_g * (est_y_g * (1 - est_y_g)))
 
     partial_M2 <- partial_M2 / n
-    partial_M3 <- partial_M3 / n
 
-    partial_M2_inv <- solve(partial_M2)
-    partial_M3_inv <- solve(partial_M3)
 
     # create bread matrix for vegetarian sandwich estimator
-    bread_matrix <- rbind(
-      cbind(-1, A %*% partial_M2_inv, B %*% partial_M3_inv),
-      cbind(0, partial_M2_inv, matrix(0, nrow = n_features_f, ncol = n_features_g)),
-      cbind(0, matrix(0, nrow = n_features_g, ncol = n_features_f), partial_M3_inv)
+    to_inverse <- rbind(
+      cbind(-1, t(A)),
+      cbind(0, partial_M2)
     )
 
+    bread_matrix <- solve(to_inverse)
+
     # create cheese matrix for vegetarian sandwich estimator
-    cheese_matrix <- matrix(0, nrow = n_features_f + n_features_g + 1, ncol = n_features_f + n_features_g + 1)
+    cheese_matrix <- matrix(0, nrow = n_features_f + 1, ncol = n_features_f + 1)
     for (i in 1:n) {
-      M1 <- y_f[i] - y_g[i] - clinical_util
+      M1 <- y_f[i] - df$y[i] - clinical_util
       M2 <- model_mat_f[i, ] * (df$y[i] - est_y_f[i])
-      M3 <- model_mat_g[i, ] * (df$y[i] - est_y_g[i])
-      m_i <- c(M1, M2, M3)
+      m_i <- c(M1, M2)
       cheese_matrix <- cheese_matrix + outer(m_i, m_i, "*")
     }
     cheese_matrix <- cheese_matrix / n
@@ -295,22 +263,21 @@ cu_gcomp_b <- function(df, f, g, est_variance = FALSE) {
 
 #' Calculate Clinical Utility
 #'
-#' This function calculates the clinical utility of two treatment assignment functions `f` and `g`
-#' using a non binary outcome regression (g-computation). Optionally, it can also estimate the variance of the
+#' This function calculates the clinical utility of regime f with the mean
+#' #' using a non binary outcome regression (g-computation). Optionally, it can also estimate the variance of the
 #' clinical utility difference.
 #'
 #' @param df A data frame containing the dataset. It must include columns "t" (treatment) and "y" (outcome).
 #' @param f A treatement regime that assigns treatment based on the covariates in `df`.
-#' @param g Another treatment regime that assigns treatment based on the covariates in `df`.
 #' @param est_variance A logical value indicating whether to estimate the variance of the clinical utility
 #' difference. Default is TRUE.
 #'
 #' @return A list containing:
-#' \item{clinical_util}{The difference in clinical utility between the two treatment assignment functions `f` and `g`.}
+#' \item{clinical_util}{The difference in clinical utility between treatment assignment functions `f` and its mean.}
 #' \item{variance}{(Optional) The estimated variance of the clinical utility difference, if `est_variance` is TRUE.}
 #'
 #' @export
-cu_gcomp_nb <- function(df, f, g, est_variance = FALSE) {
+cu_gcomp_nb <- function(df, f, est_variance = FALSE) {
   n <- nrow(df)
 
   df$t1 <- as.integer(df$t == 1)
@@ -332,22 +299,14 @@ cu_gcomp_nb <- function(df, f, g, est_variance = FALSE) {
 
   y_f <- predict(model, newdata = df, type = "response")
 
-  df$t1 <- as.integer(g(df) == 1)
-  df$t2 <- as.integer(g(df) == 2)
-  df$t3 <- as.integer(g(df) == 3)
 
-  # calculate model matrix for input according to g
-  model_mat_g <- model.matrix(formula, data = df)
-
-  y_g <- predict(model, newdata = df, type = "response")
-
-  clinical_util <- mean(y_f - y_g)
+  clinical_util <- mean(y_f - df$y)
 
   if (est_variance) {
     model_mat <- model.matrix(model)
     n_features <- ncol(model_mat)
 
-    A <- colSums((model_mat_f * y_f * (-1) * (1 - y_f)) - (model_mat_g * y_g * (-1) * (1 - y_g))) / n
+    A <- colSums((model_mat_f * y_f * (-1) * (1 - y_f))) / n
 
     partial_M2 <- t(model_mat) %*% (model_mat * (est_y * (1 - est_y)))
     partial_M2 <- partial_M2 / n
@@ -362,7 +321,7 @@ cu_gcomp_nb <- function(df, f, g, est_variance = FALSE) {
     # create cheese matrix for vegetarian sandwich estimator
     cheese_matrix <- matrix(0, nrow = n_features + 1, ncol = n_features + 1)
     for (i in 1:n) {
-      M1 <- y_f[i] - y_g[i] - clinical_util
+      M1 <- y_f[i] - df$y[i] - clinical_util
       M2 <- model_mat[i, ] * (df$y[i] - est_y[i])
       m_i <- c(M1, M2)
       cheese_matrix <- cheese_matrix + outer(m_i, m_i, "*")
@@ -513,23 +472,23 @@ f_3 <- function(df) rep(3, nrow(df))
 
 data <- generate_data_nb(f = f_1, n = 100000, slider = NULL, print_summary = TRUE)
 df <- data$sim_data
-cu_ipw_b(df, f_1, f_2, est_variance = TRUE)
-cu_ipw_nb(df, f_1, f_2, est_variance = TRUE)
-cu_gcomp_b(df, f_1, f_2, est_variance = TRUE)
+cu_ipw_b(df, f_1, est_variance = TRUE)
+cu_ipw_nb(df, f_1, est_variance = TRUE)
+cu_gcomp_b(df, f_1, est_variance = TRUE)
 # only works for ca: n > 50000
-cu_gcomp_nb(df, f_1, f_2, est_variance = TRUE)
+cu_gcomp_nb(df, f_1, est_variance = TRUE)
 
 
 # verify variance estimation
 n_loop <- 300
-n <- 10000
+n <- 1000
 results <- numeric(n_loop)
 variances <- numeric(n_loop)
 for (i in 1:n_loop) {
   df <- generate_data_nb(f = f_1, n = n, slider = 1)$sim_data
-  cu <- cu_gcomp_b(df, f_1, f_2, est_variance = FALSE)
+  cu <- cu_gcomp_b(df, f_1, est_variance = TRUE)
   results[i] <- cu$clinical_utility
-  # variances[i] <- cu$variance
+  variances[i] <- cu$variance
 }
 mean(variances) / var(results)
 hist(variances)
