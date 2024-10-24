@@ -464,7 +464,7 @@ generate_data_nb <- function(n = 10000, f = NULL, print_summary = FALSE, slider 
 
 
 
-# example calculations:
+# example calculation:
 f_1 <- function(df) rep(1, nrow(df))
 f_2 <- function(df) rep(2, nrow(df))
 f_3 <- function(df) rep(3, nrow(df))
