@@ -1,4 +1,5 @@
 # Ignore all files
 *
-# Except variance_estimate.R
+# Except 
 !variance_estimation/variance_estimate.R
+!variance_estimation/variance_estimate_mean.R
