@@ -1,6 +1,6 @@
-# Supplementary Material for Simulation and Estimation
+# Supplementary Material for paper [Estimation of clinical utility in estimated clinical trials](add.link)
 
-This repository is a supplement to our paper and contains all the R code for simulations and estimators.
+This repository is a supplement to our paper and contains all the R code for simulations and contains the estimators used in the real data example.
 
 ## Description
 
