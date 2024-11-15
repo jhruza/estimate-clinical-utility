@@ -1,0 +1,50 @@
+# SETTING 1
+
+#simulations parameters to change
+NAME_OF_SIM <- "setting_1"
+SLIDER = NULL
+f <- f_optimal
+
+# SETTING 2
+
+#simulations parameters to change
+NAME_OF_SIM <- "setting_2"
+SLIDER = 1.47
+f <- function(df) {
+  t <- numeric(nrow(df))
+
+  t[df$z_1 < 0.7] <- 1
+  t[df$z_1 > 0.9] <- 3
+  t[(df$z_1 >= 0.7) & (df$z_1 <= 0.9)] <- 2
+
+  return(t)
+}
+
+# SETTING 3
+
+#simulations parameters to change
+NAME_OF_SIM <- "setting_3"
+SLIDER = 1
+f <- function(df) {
+  t <- numeric(nrow(df))
+
+  t[df$z_1 < 0.7] <- 1
+  t[df$z_1 > 0.9] <- 3
+  t[(df$z_1 >= 0.7) & (df$z_1 <= 0.9)] <- 2
+
+  return(t)
+}
+
+
+# SETTING 4
+
+#simulations parameters to change
+source("estimators_mis.R")
+NAME_OF_SIM <- "setting_1_mis"
+SLIDER = NULL
+f <- f_optimal
+# specify which estimators to use in simulation
+# ordering of variables associated functions should match
+var_order <- list("ipw_b", "ipw_nb", "gc_b", "gc_nb")
+fun_order <- list(calculate_ipw_b, calculate_ipw_nb,
+                  calculate_gcomp_b, calculate_gcomp_nb)
