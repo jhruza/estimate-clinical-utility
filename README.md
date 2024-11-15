@@ -13,3 +13,4 @@ The R scripts in this repository are used to perform simulations and implement t
 - Required R packages:
   - ggplot2
   - nnet
+  - xtable 
