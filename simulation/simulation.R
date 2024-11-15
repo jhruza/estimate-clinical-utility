@@ -123,7 +123,7 @@ for (n in n_individuals) {
   # stop cluster
   stopCluster(cl)
 
-  # write simulated data into file for laster analysis
+  # write simulated data into file for faster analysis
   df <- data.frame(final_matrix)
   rownames(df) <- c(
     paste0(var_order, "_estimand"),
