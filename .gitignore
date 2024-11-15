@@ -3,7 +3,7 @@
 # Except 
 !variance_estimation/
 !variance_estimation/variance_estimate.R
-!variance_estimation/variance_estimate_means.R
+!variance_estimation/variance_estimate_SOC.R
 !simulation/
 !simulation/estimators_mis.R
 !simulation/simulation.R
