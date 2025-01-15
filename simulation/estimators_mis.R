@@ -87,7 +87,7 @@ calculate_ipw_b <- function(df, f) {
   df$z_1 <- as.factor(df$z_1)
 
   model <-
-    glm(w ~ 0 + z_1 + z_2, data = df) 
+    glm(w ~  z_1 + z_2, data = df)
 
   weights <-
     predict(model, df[w, c("z_1", "z_2")], type = "response")
@@ -102,7 +102,7 @@ calculate_ipw_nb <- function(df, f) {
   df$z_1 <- as.factor(df$z_1)
 
 
-  model <- multinom(t ~ 0 + z_1 + z_2, data = df, trace = FALSE) 
+  model <- multinom(t ~  z_1, data = df, trace = FALSE)
 
   all_weights <-
     predict(model, newdata = df[w, c("z_1", "z_2")], type = "probs") # nolint
@@ -127,7 +127,7 @@ calculate_gcomp_b <- function(df, f) {
   df$proposed_t <- w
 
   model <-
-    glm(y ~ 0 + z_1 + z_2 + proposed_t,
+    glm(y ~ z_1 + proposed_t,
         data = df)
 
   df$proposed_t <- TRUE
@@ -154,114 +154,7 @@ calculate_gcomp_nb <- function(df, f) {
   df$t3 <- as.integer(f(df) == 3)
 
   weights <-
-    predict(model, df[c("z_1", "z_2", "t1", "t2","t3")], type = "response") # nolint: line_length_linter.
+    predict(model, df[c("z_1", "z_2", "t1", "t2", "t3")], type = "response") # nolint: line_length_linter.
   expected_y <- sum(weights) / nrow(df)
-  return(expected_y)
-}
-
-calculate_dr_gc <- function(df, f) {
-
-  # implcit assumtion: g_comp_nb estiamtes with non categorical z_1 but ipw_b does # nolint
-
-  # estimating outcomes via g_comp_nb
-  df$t1 <- as.integer(df$t == 1)
-  df$t2 <- as.integer(df$t == 2)
-  df$t3 <- as.integer(df$t == 3)
-
-  model <-
-    glm(y ~ 0 + t1 + t2 + t3 + z_1 + z_2, , 
-        data = df)
-
-  df$t1 <- as.integer(f(df) == 1)
-  df$t2 <- as.integer(f(df) == 2)
-  df$t3 <- as.integer(f(df) == 3)
-
-  y_hat <-
-    predict(model, df[c("z_1", "z_2", "t1", "t2","t3")], type = "response") # nolint: line_length_linter.
-
-  # estimating propensity scores via ipw_b
-  w <- f(df) == df$t
-  df$z_1 <- as.factor(df$z_1)
-
-  model <-
-    glm(w ~ z_1*z_2, family = binomial(link = "logit"), data = df) # nolint
-  propensity_score <-
-    predict(model, df[w, c("z_1", "z_2")], type = "response")
-
-  # calculation of double robust estimator as defined in paper
-  expected_y <- sum(y_hat)/nrow(df) + sum((1 / propensity_score) * (df$y[w] - y_hat[w])) / nrow(df) # nolint: line_length_linter.
-
-  return(expected_y)
-}
-
-calculate_dr_ipw <- function(df, f) {
-
-  # implcit assumtion: g_comp_nb estiamtes with non categorical z_1 but ipw_b does # nolint
-
-  # estimating outcomes via g_comp_nb
-  df$t1 <- as.integer(df$t == 1)
-  df$t2 <- as.integer(df$t == 2)
-  df$t3 <- as.integer(df$t == 3)
-
-  model <-
-    glm(df$y ~ 0 + t1 + t1:(z_1 + z_2) + t2 + t2:(z_2) + t3 + t3:(z_1 + z_2),  # nolint: line_length_linter.
-        data = df)
-
-  df$t1 <- as.integer(f(df) == 1)
-  df$t2 <- as.integer(f(df) == 2)
-  df$t3 <- as.integer(f(df) == 3)
-
-  y_hat <-
-    predict(model, df[c("z_1", "z_2", "t1", "t2","t3")], type = "response") # nolint: line_length_linter.
-
-  # estimating propensity scores via ipw_b
-  w <- f(df) == df$t
-  df$z_1 <- as.factor(df$z_1)
-
-  model <-
-    glm(w ~ 0 + z_1 + z_2, data = df) 
-
-  propensity_score <-
-    predict(model, df[w, c("z_1", "z_2")], type = "response")
-
-  # calculation of double robust estimator as defined in paper
-  expected_y <- sum(y_hat)/nrow(df) + sum((1 / propensity_score) * (df$y[w] - y_hat[w])) / nrow(df) # nolint: line_length_linter.
-
-  return(expected_y)
-}
-
-calculate_dr <- function(df, f) {
-
-  # implcit assumtion: g_comp_nb estiamtes with non categorical z_1 but ipw_b does # nolint
-
-  # estimating outcomes via g_comp_nb
-  df$t1 <- as.integer(df$t == 1)
-  df$t2 <- as.integer(df$t == 2)
-  df$t3 <- as.integer(df$t == 3)
-
-  model <-
-    glm(y ~ 0 + t1 + t2 + t3 + z_1 + z_2, 
-        data = df)
-
-  df$t1 <- as.integer(f(df) == 1)
-  df$t2 <- as.integer(f(df) == 2)
-  df$t3 <- as.integer(f(df) == 3)
-
-  y_hat <-
-    predict(model, df[c("z_1", "z_2", "t1", "t2","t3")], type = "response") # nolint: line_length_linter.
-
-  # estimating propensity scores via ipw_b
-  w <- f(df) == df$t
-  df$z_1 <- as.factor(df$z_1)
-
-  model <-
-    glm(w ~ 0 + z_1 + z_2, data = df) 
-
-  propensity_score <-
-    predict(model, df[w, c("z_1", "z_2")], type = "response")
-
-  # calculation of double robust estimator as defined in paper
-  expected_y <- sum(y_hat)/nrow(df) + sum((1 / propensity_score) * (df$y[w] - y_hat[w])) / nrow(df) # nolint: line_length_linter.
-
   return(expected_y)
 }

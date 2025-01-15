@@ -1,11 +1,20 @@
 library(xtable)
 
 
-# simulations parameters to change
-source("estimators_mis.R")
-NAME_OF_SIM <- "setting_1_mis"
-SLIDER <- NULL
-f <- f_optimal
+#simulations parameters to change
+source("estimate-clinical-utility/simulation/estimators_mis.R")
+NAME_OF_SIM <- "setting_2_mis"
+SLIDER = 1.47
+f <- function(df) {
+  t <- numeric(nrow(df))
+
+  t[df$z_1 < 0.7] <- 1
+  t[df$z_1 > 0.9] <- 3
+  t[(df$z_1 >= 0.7) & (df$z_1 <= 0.9)] <- 2
+
+  return(t)
+}
+
 # specify which estimators to use in simulation
 # ordering of variables associated functions should match
 var_order <- list("ipw_b", "ipw_nb", "gc_b", "gc_nb")
